@@ -22,6 +22,7 @@
     --accent: #2347c5;          /* taxiway blue: anything you can act on */
     --accent-ink: #ffffff;
     --accent-soft: #e5eafa;
+    --accent-wash: #f4f6fd;     /* hover tint on things that open */
     --red: #b3261e;   --red-soft: #fbe8e6;
     --amber: #8a5300; --amber-soft: #fcefd6;
     --green: #1b6c44; --green-soft: #e1f1e8;
@@ -35,7 +36,7 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0c0f15; --surface: #141922; --surface-2: #1a202b; --ink: #e4e8ef; --muted: #9ba5b6;
-      --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647;
+      --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647; --accent-wash: #172036;
       --red: #ff8c82; --red-soft: #3b1c1a; --amber: #f2b65c; --amber-soft: #372912; --green: #72d4a2; --green-soft: #12301f;
       --scrim: rgba(0, 0, 0, .55); --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35);
       color-scheme: dark;
@@ -43,7 +44,7 @@
   }
   :root[data-theme="dark"] {
     --bg: #0c0f15; --surface: #141922; --surface-2: #1a202b; --ink: #e4e8ef; --muted: #9ba5b6;
-    --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647;
+    --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647; --accent-wash: #172036;
     --red: #ff8c82; --red-soft: #3b1c1a; --amber: #f2b65c; --amber-soft: #372912; --green: #72d4a2; --green-soft: #12301f;
     --scrim: rgba(0, 0, 0, .55); --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35);
     color-scheme: dark;
@@ -95,7 +96,7 @@
   [data-row] { scroll-margin-top: 170px; scroll-margin-bottom: 16px; }
   .card { display: grid; grid-template-columns: 150px minmax(0, 1fr) 210px; gap: 18px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
   .card > * { min-width: 0; }
-  .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+  .card:hover { border-color: var(--accent); background: var(--accent-wash); box-shadow: var(--shadow); }
   .card.is-open { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .clock .big { font: 600 36px/1 var(--font-display); letter-spacing: .01em; font-variant-numeric: tabular-nums; }
   .clock .lbl { margin-top: 4px; color: var(--muted); font-size: 13px; }
@@ -223,6 +224,7 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .drawer { animation: slide-in .18s ease-out; }
+    .card { transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease; }
     @keyframes slide-in { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } }
   }
 </style>
