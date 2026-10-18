@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connection Watcher</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: an ops desk. A header with search and tabs sits over one feed of cards sorted by deadline;
+     a right-hand drawer holds a single itinerary and, on wide screens, leaves the feed in view. */
+  :root {
+    --bg: #f1f3f7;
+    --surface: #ffffff;
+    --surface-2: #f5f7fa;
+    --ink: #121723;
+    --muted: #586274;
+    --line: #dce1e9;
+    --line-strong: #c2c9d5;
+    --accent: #2347c5;          /* taxiway blue: anything you can act on */
+    --accent-ink: #ffffff;
+    --accent-soft: #e5eafa;
+    --red: #b3261e;   --red-soft: #fbe8e6;
+    --amber: #8a5300; --amber-soft: #fcefd6;
+    --green: #1b6c44; --green-soft: #e1f1e8;
+    --scrim: rgba(18, 23, 35, .32);
+    --shadow: 0 1px 2px rgba(18, 23, 35, .06), 0 8px 24px rgba(18, 23, 35, .08);
+    --font-ui: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-display: "Barlow Semi Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --drawer-w: 540px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c0f15; --surface: #141922; --surface-2: #1a202b; --ink: #e4e8ef; --muted: #9ba5b6;
+      --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647;
+      --red: #ff8c82; --red-soft: #3b1c1a; --amber: #f2b65c; --amber-soft: #372912; --green: #72d4a2; --green-soft: #12301f;
+      --scrim: rgba(0, 0, 0, .55); --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c0f15; --surface: #141922; --surface-2: #1a202b; --ink: #e4e8ef; --muted: #9ba5b6;
+    --line: #273041; --line-strong: #3a4558; --accent: #93a9ff; --accent-ink: #0c0f15; --accent-soft: #1c2647;
+    --red: #ff8c82; --red-soft: #3b1c1a; --amber: #f2b65c; --amber-soft: #372912; --green: #72d4a2; --green-soft: #12301f;
+    --scrim: rgba(0, 0, 0, .55); --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  h2, h3 { text-wrap: balance; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .mono { font-family: var(--font-data); font-size: .92em; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .u-red { color: var(--red); } .u-amber { color: var(--amber); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--amber-soft); color: var(--amber); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 1px; }
+  kbd { font-family: var(--font-data); font-size: 11px; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+
+  /* Header */
+  .top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .row1 { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; padding-block: 10px 8px; }
+  .brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .brand .name { font-size: 17px; font-weight: 700; }
+  .brand .scope, .status { font-size: 13px; color: var(--muted); }
+  .status b { font-family: var(--font-data); font-weight: 500; color: var(--ink); }
+  .search { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--muted); }
+  .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; }
+  .search input::placeholder { color: var(--muted); }
+  .tabs { display: flex; gap: 4px; margin-top: 4px; overflow-x: auto; }
+  .tab { appearance: none; padding: 10px 10px 9px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; }
+  .tab:hover { color: var(--ink); }
+  .tab:focus-visible { outline-offset: -2px; }
+  .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .count { display: inline-block; min-width: 22px; margin-left: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted); font: 500 12px/18px var(--font-data); text-align: center; }
+  .tab[aria-selected="true"] .count { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+
+  /* Feed */
+  main { padding-block: 18px 56px; }
+  .overview { max-width: 80ch; font-size: 15px; }
+  .searching { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
+  .label { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .feed { display: grid; gap: 10px; }
+  .none { color: var(--muted); font-size: 14px; }
+  [data-row] { scroll-margin-top: 170px; scroll-margin-bottom: 16px; }
+  .card { display: grid; grid-template-columns: 150px minmax(0, 1fr) 210px; gap: 18px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
+  .card > * { min-width: 0; }
+  .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+  .card.is-open { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .clock .big { font: 600 36px/1 var(--font-display); letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+  .clock .lbl { margin-top: 4px; color: var(--muted); font-size: 13px; }
+  .clock .then { margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+  .who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .who .names { font-size: 16px; font-weight: 700; }
+  .who .meta { color: var(--muted); font-size: 13px; }
+  .who .tier { margin-left: auto; }
+  .route { margin-top: 2px; color: var(--muted); }
+  .why { margin-top: 8px; }
+  .tier { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+  .tier .n { font-family: var(--font-data); font-weight: 500; }
+  .t-red { background: var(--red-soft); color: var(--red); }
+  .t-amber { background: var(--amber-soft); color: var(--amber); }
+  .t-green { background: var(--green-soft); color: var(--green); }
+  .new { padding: 1px 7px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .actions { display: flex; flex-direction: column; gap: 8px; }
+  .st { color: var(--muted); font-size: 12.5px; }
+  .st.warn { color: var(--amber); } .st.bad { color: var(--red); font-weight: 700; } .st.good { color: var(--green); font-weight: 700; }
+  .btn { appearance: none; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.1); color: var(--accent-ink); }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .btn-row .btn { flex: 1; }
+  .link { appearance: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+  .empty { display: grid; justify-items: start; gap: 10px; padding: 22px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface); }
+
+  /* Watching */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  th { background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 700; }
+  .watch tbody tr { cursor: pointer; }
+  .watch tbody tr:hover { background: var(--surface-2); }
+  .watch tbody tr.is-open { background: var(--accent-soft); }
+  tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .neg { color: var(--red); }
+  .foot { max-width: 80ch; margin-top: 10px; color: var(--muted); font-size: 13px; }
+
+  /* Weather */
+  .airports { display: grid; gap: 12px; margin-top: 14px; }
+  .ap { min-width: 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .ap-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .ap-code { font: 600 30px/1 var(--font-display); }
+  .ap-name { font-weight: 700; }
+  .ap .now { margin-top: 8px; font-size: 14px; }
+  .ap .now.sev { color: var(--amber); font-weight: 700; }
+  .k { margin-right: 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .strip-key { margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(58px, 1fr); gap: 4px; margin: 6px 0 0; padding: 0 0 4px; overflow-x: auto; list-style: none; }
+  .hr { display: grid; justify-items: center; gap: 1px; padding: 6px 4px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .hr .h, .hr .p { color: var(--muted); font-family: var(--font-data); font-size: 11px; }
+  .hr .g { font: 500 15px/1.2 var(--font-data); }
+  .hr.sev { border-color: transparent; background: var(--amber-soft); color: var(--amber); }
+  .hr.sev .h, .hr.sev .p { color: var(--amber); }
+  .hours { display: grid; gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+  .hrow { display: grid; grid-template-columns: minmax(0, 270px) minmax(0, 1fr); gap: 6px 16px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .hrow .when { display: grid; gap: 2px; }
+  .hrow .when span { color: var(--muted); font-size: 12.5px; }
+  .hrow.sev .when span { color: var(--amber); }
+  .hrow .when .boosted { color: var(--accent); font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
+  .fchip { appearance: none; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .fchip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Itinerary drawer */
+  .scrim { position: fixed; inset: 0; z-index: 20; background: var(--scrim); }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 30; display: flex; flex-direction: column; width: min(var(--drawer-w), 100%); padding-top: env(safe-area-inset-top, 0px); padding-right: env(safe-area-inset-right, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); border-left: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); }
+  .d-scroll { flex: 1; overflow-y: auto; padding: 18px 22px 36px; }
+  .d-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .d-head h2 { margin: 2px 0 0; font-size: 20px; line-height: 1.25; }
+  .eyebrow { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .icon-btn { appearance: none; flex: none; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1; cursor: pointer; }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .d-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; margin-top: 14px; }
+  .d-status .big { font: 600 30px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+  .d-actions { margin-top: 12px; }
+  .d-sec { display: grid; gap: 10px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .d-sec h3 { margin: 0; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .journey { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .stop { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: baseline; gap: 12px; }
+  .stop .code { font: 600 20px/1 var(--font-display); }
+  .conn { margin-left: 60px; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+  .conn.bad { background: var(--red-soft); color: var(--red); }
+  .conn.warn { background: var(--amber-soft); color: var(--amber); }
+  .conn.good { background: var(--green-soft); color: var(--green); }
+  .late { color: var(--red); font-family: var(--font-data); font-size: 12.5px; }
+  .ticket { font-size: 14px; }
+  .ticket.exposed { color: var(--amber); }
+  .windows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .win { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  .win > .muted { grid-column: 2; font-size: 13px; }
+  .win.now { border-color: var(--accent); background: var(--accent-soft); }
+  .win.passed { color: var(--muted); }
+  .win.passed b { text-decoration: line-through; }
+  .readings { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .readings li { display: grid; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+  .readings li .mono { font-size: 14px; }
+  .readings li.neg { border-color: transparent; background: var(--red-soft); color: var(--red); }
+  .d-sec table { font-size: 12.5px; }
+  .d-sec th, .d-sec td { padding: 7px 9px; }
+  tr.sev td { background: var(--amber-soft); color: var(--amber); }
+  .draft { padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+  .log { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+  .log li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; }
+
+  /* Notes */
+  .notes { display: grid; gap: 8px; max-width: 80ch; margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+  .notes h2 { margin: 0 0 2px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .notes b { color: var(--ink); }
+
+  @media (min-width: 1200px) {
+    body.drawer-open .page { margin-right: var(--drawer-w); }
+    .scrim { display: none; }
+  }
+  @media (max-width: 1199px) { body.drawer-open { overflow: hidden; } }
+  /* Desktop prototype. Cards follow the feed's own width, so they reflow when the drawer takes the right side. */
+  .feed { container-type: inline-size; }
+  @container (max-width: 760px) {
+    .card { grid-template-columns: 104px minmax(0, 1fr); gap: 12px 16px; }
+    .clock .big { font-size: 30px; }
+    .card .actions { grid-column: 2; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .drawer { animation: slide-in .18s ease-out; }
+    @keyframes slide-in { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="wrap">
+      <div class="row1">
+        <div class="brand">
+          <span class="name">Connection watcher</span>
+          <span class="scope">Hub AMS · v1 slice · <span class="tag">Sample bookings</span></span>
+        </div>
+        <p class="status"><span id="wxStatus">Loading live weather…</span> · <a id="rawLink" href="https://open-meteo.com/" target="_blank" rel="noopener">raw response</a> · Now <b id="clock">–</b></p>
+      </div>
+      <label class="search" for="q">
+        <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="sr">Search</span>
+        <input id="q" type="search" placeholder="Search passenger, flight or airport" autocomplete="off" spellcheck="false">
+        <kbd aria-hidden="true">/</kbd>
+      </label>
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <button class="tab" type="button" role="tab" id="tab-risk" data-tab="risk" aria-controls="panel-risk" aria-selected="true">At risk <span class="count" id="n-risk">0</span></button>
+        <button class="tab" type="button" role="tab" id="tab-watch" data-tab="watch" aria-controls="panel-watch" aria-selected="false">Watching <span class="count" id="n-watch">0</span></button>
+        <button class="tab" type="button" role="tab" id="tab-wx" data-tab="wx" aria-controls="panel-wx" aria-selected="false">Weather <span class="count" id="n-wx">0</span></button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <p class="searching" id="searching" hidden></p>
+    <section id="panel-risk" role="tabpanel" aria-labelledby="tab-risk">
+      <p class="overview" id="overview">Loading…</p>
+      <div id="feed"></div>
+    </section>
+    <section id="panel-watch" role="tabpanel" aria-labelledby="tab-watch" hidden>
+      <p class="overview">Every other connection in the slice, riskiest first. None of these has met the alert rule.</p>
+      <div id="watch" style="margin-top: 14px"></div>
+    </section>
+    <section id="panel-wx" role="tabpanel" aria-labelledby="tab-wx" hidden>
+      <p class="overview">Live Open-Meteo readings for each airport in the slice, next to the watched flights that use each hour. Severe hours mean those flights get checked more often. They don't raise alerts.</p>
+      <div id="wx" class="airports"></div>
+    </section>
+
+    <footer class="notes">
+      <h2>How this screen works</h2>
+      <p><b>Data.</b> Weather is live from Open-Meteo. Itineraries and flight status are sample data standing in for the backend connection and the flight-status feed, timed from when you opened this page.</p>
+      <p><b>Time to act</b> counts down to the next window that closes: boarding while the traveller is still at the origin, then landing. After landing it counts to leg 2's departure, which is recovery only. Flight feeds don't report boarding, so it's assumed to start 45 min before the estimated departure (KLM boards European flights 25–60 min before).</p>
+      <p><b>Projected slack</b> = leg 2's estimated departure − leg 1's estimated arrival − the hub's minimum connection time (AMS: 50 min, a sample figure; 60 where we don't have one). An alert needs 2 checks in a row below 0. A cancellation is re-checked before anyone is alerted.</p>
+      <p><b>Matching.</b> Each flight is matched to the Open-Meteo hour that covers its estimated departure (at its origin) or arrival (at its destination), then shown in airport local time. Weather never raises an alert here. It makes us check those flights more often, and it explains the alert.</p>
+      <p><b>Severe</b> (starting thresholds): thunderstorm (WMO 95/96/99), freezing drizzle or rain (56/57/66/67), heavy snow (75/86), gusts ≥ 55 km/h, visibility under 1,000 m.</p>
+      <p><b>Keys.</b> <kbd>/</kbd> search · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>A</kbd> I'm on it · <kbd>Esc</kbd> close</p>
+    </footer>
+  </main>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Itinerary" hidden>
+  <div class="d-scroll" id="drawerBody"></div>
+</aside>
+
+<script>
+'use strict';
+
+// Rules. All starting values, to be tuned in shadow mode.
+const AIRPORTS = {
+  BCN: { name: 'Barcelona El Prat',  city: 'Barcelona',  lat: 41.2974, lon: 2.0833,   tz: 'Europe/Madrid' },
+  MAD: { name: 'Madrid Barajas',     city: 'Madrid',     lat: 40.4983, lon: -3.5676,  tz: 'Europe/Madrid' },
+  AMS: { name: 'Amsterdam Schiphol', city: 'Amsterdam',  lat: 52.3105, lon: 4.7683,   tz: 'Europe/Amsterdam' },
+  CPH: { name: 'Copenhagen Kastrup', city: 'Copenhagen', lat: 55.6180, lon: 12.6508,  tz: 'Europe/Copenhagen' },
+  LHR: { name: 'London Heathrow',    city: 'London',     lat: 51.4700, lon: -0.4543,  tz: 'Europe/London' },
+  JFK: { name: 'New York JFK',       city: 'New York',   lat: 40.6413, lon: -73.7781, tz: 'America/New_York' },
+};
+const MCT = { AMS: 50 };            // minimum connection time, minutes; 60 where we don't have one
+const GUST_KMH = 55, VIS_M = 1000;  // severe-weather thresholds
+const ESCALATE_MIN = 15;            // an alert nobody picks up goes back to the care team after this
+const TIGHT_MIN = 15;               // slack under this counts as tight
+const NEW_MIN = 5;
+const BOARDING_MIN = 45;            // boarding starts this long before estimated departure; flight feeds don't report it
+const SEVERE_CODES = { 95: 'Thunderstorm', 96: 'Thunderstorm, hail', 99: 'Thunderstorm, heavy hail',
+  56: 'Freezing drizzle', 57: 'Freezing drizzle', 66: 'Freezing rain', 67: 'Freezing rain', 75: 'Heavy snow', 86: 'Heavy snow showers' };
+const WMO = { 0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Rime fog',
+  51: 'Light drizzle', 53: 'Drizzle', 55: 'Dense drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain',
+  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains', 80: 'Rain showers', 81: 'Rain showers',
+  82: 'Violent showers', 85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm, hail', 99: 'Thunderstorm, hail' };
+const TIERS = { cancel: ['Cancelled', 't-red'], risk: ['At risk', 't-red'], back: ['Back on track', 't-green'],
+  unconf: ['Unconfirmed', 't-amber'], tight: ['Tight', 't-amber'], ok: ['OK', 't-green'] };
+const ON_FEED = new Set(['cancel', 'risk', 'back']);
+const MSG_LABEL = { heads: 'Heads-up', cancel: 'Cancellation notice', back: 'Back-on-track message' };
+const TAB_NAME = { risk: 'At risk', watch: 'Watching', wx: 'Weather' };
+const CARRIERS = { KL: 'KLM', VY: 'Vueling' };
+const WARN = '⚠︎';
+
+// Sample itineraries, in minutes from page load (T0). Stand-in for the backend and the flight feed.
+const T0 = Math.floor(Date.now() / 60000) * 60000;
+const at = min => T0 + min * 60000;
+const BLOCK = { 'BCN-AMS': 145, 'MAD-AMS': 155, 'AMS-CPH': 85, 'AMS-LHR': 80, 'AMS-JFK': 510 };
+const leg = (flight, from, to, dep, delay = 0) =>
+  ({ flight, from, to, schedDep: at(dep), schedArr: at(dep + BLOCK[from + '-' + to]), delay });
+const CONNECTIONS = [
+  // Alerted
+  { id: 'c1', ref: 'PK-48402', travellers: ['A. Moreau', 'P. Novak'], company: 'Marlow Systems', contact: 'SMS and email',
+    leg1: leg('KL1662', 'BCN', 'AMS', 0, 60), leg2: leg('KL1129', 'AMS', 'CPH', 230), history: [-10, -20], alertAgo: 3 },
+  { id: 'c2', ref: 'PK-48377', travellers: ['J. Okafor'], company: 'Halden Analytics', contact: 'App and email', ticket: 'separate',
+    leg1: leg('VY8301', 'BCN', 'AMS', -142, 45), leg2: leg('KL1125', 'AMS', 'CPH', 68), history: [-20, -28], alertAgo: 12 },
+  { id: 'c3', ref: 'PK-48560', travellers: ['S. Haddad', 'T. Brandt', 'K. Ito'], company: 'Brightwell Group', contact: 'SMS and email',
+    leg1: leg('KL1704', 'MAD', 'AMS', 155), leg2: leg('KL1007', 'AMS', 'LHR', 375), history: [15, 15],
+    cancelled: { reportedAgo: 18, checkedAgo: 8 }, alertAgo: 8 },
+  { id: 'c4', ref: 'PK-48213', travellers: ['L. Svensson'], company: 'Corvid Labs', contact: 'Email',
+    leg1: leg('KL1670', 'BCN', 'AMS', -75, 50), leg2: leg('KL1023', 'AMS', 'LHR', 158), history: [-5, -10], alertAgo: 22,
+    ack: { by: 'J. Bakker', ago: 19 }, sent: { heads: { by: 'J. Bakker', ago: 17 } } },
+  { id: 'c5', ref: 'PK-48519', travellers: ['M. Rossi'], company: 'Alder & Finch', contact: 'SMS and email', ticket: 'separate',
+    leg1: leg('VY8305', 'BCN', 'AMS', 20, 20), leg2: leg('KL0641', 'AMS', 'JFK', 245), history: [-8, -12, 4], alertAgo: 35, recoveredAgo: 4,
+    ack: { by: 'A. Lind', ago: 31 }, sent: { heads: { by: 'A. Lind', ago: 30 } } },
+  // Watching
+  { id: 'w1', ref: 'PK-48611', travellers: ['E. Laurent'], company: 'Halden Analytics', contact: 'Email',
+    leg1: leg('KL1666', 'BCN', 'AMS', 150, 30), leg2: leg('KL0643', 'AMS', 'JFK', 372), history: [5] },
+  { id: 'w2', ref: 'PK-48633', travellers: ['F. Costa'], company: 'Brightwell Group', contact: 'SMS and email',
+    leg1: leg('KL1702', 'MAD', 'AMS', 240, 15), leg2: leg('KL1131', 'AMS', 'CPH', 468), history: [12, 10] },
+  { id: 'w3', ref: 'PK-48650', travellers: ['H. Yilmaz'], company: 'Corvid Labs', contact: 'App and email', ticket: 'separate',
+    leg1: leg('VY8309', 'BCN', 'AMS', 420, 10), leg2: leg('KL1015', 'AMS', 'LHR', 629), history: [9, 6] },
+  { id: 'w4', ref: 'PK-48702', travellers: ['C. Dubois', 'R. Silva'], company: 'Alder & Finch', contact: 'Email',
+    leg1: leg('KL1672', 'BCN', 'AMS', 600), leg2: leg('KL0645', 'AMS', 'JFK', 830), history: [35, 35] },
+  { id: 'w5', ref: 'PK-48719', travellers: ['N. Adeyemi'], company: 'Marlow Systems', contact: 'SMS and email',
+    leg1: leg('KL1706', 'MAD', 'AMS', 60), leg2: leg('KL1027', 'AMS', 'LHR', 290), history: [25, 25] },
+  { id: 'w6', ref: 'PK-48733', travellers: ['I. Petrova'], company: 'Halden Analytics', contact: 'App and email', ticket: 'separate',
+    leg1: leg('VY8303', 'BCN', 'AMS', -60, 5), leg2: leg('KL1127', 'AMS', 'CPH', 160), history: [25, 22] },
+  { id: 'w7', ref: 'PK-48741', travellers: ['D. Mensah'], company: 'Brightwell Group', contact: 'Email',
+    leg1: leg('KL1708', 'MAD', 'AMS', 330), leg2: leg('KL0647', 'AMS', 'JFK', 575), history: [40, 40] },
+  { id: 'w8', ref: 'PK-48766', travellers: ['S. Kowalski'], company: 'Corvid Labs', contact: 'SMS and email',
+    leg1: leg('KL1674', 'BCN', 'AMS', 780), leg2: leg('KL1133', 'AMS', 'CPH', 987), history: [12, 12] },
+  { id: 'w9', ref: 'PK-48781', travellers: ['A. Fernández'], company: 'Alder & Finch', contact: 'App and email',
+    leg1: leg('KL1710', 'MAD', 'AMS', 900), leg2: leg('KL1031', 'AMS', 'LHR', 1135), history: [30] },
+  { id: 'w10', ref: 'PK-48795', travellers: ['T. Nakamura'], company: 'Marlow Systems', contact: 'Email', ticket: 'separate',
+    leg1: leg('VY8311', 'BCN', 'AMS', 1020), leg2: leg('KL1137', 'AMS', 'CPH', 1233), history: [18] },
+  { id: 'w11', ref: 'PK-48804', travellers: ['L. Moreno'], company: 'Halden Analytics', contact: 'SMS and email',
+    leg1: leg('KL1664', 'BCN', 'AMS', -100, 35), leg2: leg('KL1123', 'AMS', 'CPH', 115, 20), history: [-2, 3] },
+  { id: 'w12', ref: 'PK-48812', travellers: ['R. Iyer'], company: 'Brightwell Group', contact: 'App and email',
+    leg1: leg('KL1712', 'MAD', 'AMS', 1140), leg2: leg('KL0649', 'AMS', 'JFK', 1380), history: [35] },
+  { id: 'w13', ref: 'PK-48827', travellers: ['K. Andersen'], company: 'Corvid Labs', contact: 'Email', ticket: 'separate',
+    leg1: leg('VY8307', 'BCN', 'AMS', 500), leg2: leg('KL1135', 'AMS', 'CPH', 717), history: [22] },
+];
+CONNECTIONS.forEach((c, i) => { c.seed = (i * 3) % 10; });
+
+const state = { tab: 'risk', q: '', open: null, ack: {}, msg: {} };
+let WX = null, wxFetchedAt = null, wxError = null, lastOpen = null;
+const $ = id => document.getElementById(id);
+const qEl = $('q');
+
+// Formatting
+const DTF = {};
+const fmt = (t, tz) => {
+  const k = tz || 'local';
+  if (!DTF[k]) DTF[k] = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+  return DTF[k].format(new Date(t));
+};
+const fmtDesk = t => fmt(t);
+const STAMP = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+const stamp = t => STAMP.format(new Date(t));  // full date and zone, so a screenshot shows when the weather was pulled
+const dur = min => { min = Math.max(0, Math.round(min)); const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`; };
+const num = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n);
+const signed = n => num(n) + ' min';
+const minsUntil = (t, now) => Math.max(0, Math.ceil((t - now) / 60000));
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const surname = c => c.travellers[0].split(' ').slice(-1)[0];
+const cond = code => WMO[code] ?? `Code ${code}`;
+const visTxt = v => v == null ? '–' : v >= 10000 ? `${Math.round(v / 1000)} km` : v >= 1000 ? `${(v / 1000).toFixed(1)} km` : `${Math.round(v)} m`;
+const wxNA = () => wxError && !WX ? 'weather unavailable' : WX ? 'outside forecast' : 'loading weather…';
+
+// Weather: the Open-Meteo hour that covers time t at an airport
+function wxAt(ap, t) {
+  const d = WX && WX[ap];
+  if (!d) return null;
+  const s = Math.floor(t / 1000), times = d.hourly.time;
+  const i = times.findIndex(x => s >= x && s < x + 3600);
+  if (i < 0) return null;
+  const h = d.hourly;
+  return { start: times[i] * 1000, code: h.weather_code[i], gust: h.wind_gusts_10m[i], wind: h.wind_speed_10m[i], precip: h.precipitation[i], vis: h.visibility ? h.visibility[i] : null };
+}
+function severeReasons(w) {
+  const r = [];
+  if (SEVERE_CODES[w.code]) r.push(SEVERE_CODES[w.code]);
+  if (w.gust != null && w.gust >= GUST_KMH) r.push(`gusts ${Math.round(w.gust)} km/h`);
+  if (w.vis != null && w.vis < VIS_M) r.push(`visibility ${Math.round(w.vis)} m`);
+  return r;
+}
+function wxParts(w, sev, withVis) {
+  const parts = [sev.length ? WARN + ' ' + sev.join(', ') : cond(w.code)];
+  if (!sev.some(r => r.startsWith('gusts'))) parts.push(`gust ${Math.round(w.gust)} km/h`);
+  parts.push(`${w.precip.toFixed(1)} mm`);
+  if (withVis && !sev.some(r => r.startsWith('visibility'))) parts.push(`vis ${visTxt(w.vis)}`);
+  return parts.join(' · ');
+}
+
+function derive(c, now) {
+  const { leg1: l1, leg2: l2 } = c;
+  const hub = l1.to, mct = MCT[hub] ?? 60;
+  const l1Delay = c.cancelled ? 0 : l1.delay;
+  const l1Dep = l1.schedDep + l1Delay * 60000, l1Arr = l1.schedArr + l1Delay * 60000;
+  const l2Dep = l2.schedDep + l2.delay * 60000, l2Arr = l2.schedArr + l2.delay * 60000;
+  const gap = Math.round((l2Dep - l1Arr) / 60000);
+  const slack = c.cancelled ? null : gap - mct;
+  const polls = c.cancelled ? [...c.history] : [...c.history, slack];
+  const ruleMet = polls.length >= 2 && polls.slice(-2).every(p => p < 0);
+  const alertAt = c.alertAgo != null ? T0 - c.alertAgo * 60000 : ruleMet ? T0 : null;
+  const tier = c.cancelled ? 'cancel'
+    : alertAt != null ? (slack < 0 ? 'risk' : 'back')
+    : slack < 0 ? 'unconf'
+    : slack < TIGHT_MIN || polls.some(p => p < 0) ? 'tight' : 'ok';
+
+  // Windows to act, in order. The clock counts to the first one still ahead. Once a traveller has
+  // boarded nothing can change at the origin, so that window closes at boarding, not take-off.
+  const boardAt = l1Dep - BOARDING_MIN * 60000;
+  const windows = [
+    c.cancelled
+      ? { name: 'Planned boarding', label: 'to planned boarding', t: boardAt, ap: l1.from, what: `Rebook them before they reach the gate at ${l1.from}` }
+      : { name: 'Boarding', label: 'to boarding', t: boardAt, ap: l1.from, what: `Last chance to reroute them from ${l1.from}. Estimated at ${BOARDING_MIN} min before departure` },
+    ...(c.cancelled ? [] : [{ name: 'Landing', label: 'to landing', t: l1Arr, ap: hub, what: `Rebook before they land, so they have a plan at ${hub}` }]),
+    { name: `${l2.flight} leaves`, label: `until ${l2.flight} leaves`, t: l2Dep, ap: hub, what: 'Connection gone: recovery only' },
+  ];
+  const wi = windows.findIndex(w => w.t > now);
+  const win = wi >= 0 ? windows[wi] : null;
+  const nextWin = wi >= 0 ? windows[wi + 1] || null : null;
+  const tta = win ? minsUntil(win.t, now) : null;
+  const phase = now >= l2Dep ? 'done' : c.cancelled ? 'cancelled'
+    : now < boardAt ? 'origin' : now < l1Dep ? 'boarding' : now < l1Arr ? 'air' : 'hub';
+
+  const checkpoints = [
+    { ap: l1.from, ev: 'dep', flight: l1.flight, t: l1Dep },
+    { ap: hub, ev: 'arr', flight: l1.flight, t: l1Arr },
+    { ap: l2.from, ev: 'dep', flight: l2.flight, t: l2Dep },
+    { ap: l2.to, ev: 'arr', flight: l2.flight, t: l2Arr },
+  ].map(p => { const w = wxAt(p.ap, p.t); return { ...p, w, severe: w ? severeReasons(w) : [] }; });
+  const severeAps = [...new Set(checkpoints.filter(p => p.severe.length).map(p => p.ap))];
+
+  // Polling: more often as time to act runs down, and again after a reading below 0
+  // or with severe weather at the origin or destination of either leg.
+  const base = tta == null || tta > 360 ? 60 : tta > 120 ? 20 : 10;
+  const boosts = [];
+  if (slack != null && slack < 0) boosts.push('slack below 0');
+  else if (polls.some(p => p < 0)) boosts.push('a recent reading below 0');
+  if (severeAps.length) boosts.push('severe weather at ' + severeAps.join(', '));
+  const every = boosts.length ? Math.max(5, base / 2) : base;
+  const nextIn = every - ((Math.floor((now - T0) / 60000) + c.seed) % every);
+  const alertMins = alertAt != null ? Math.floor((now - alertAt) / 60000) : null;
+  return { hub, mct, boardAt, l1Dep, l1Arr, l2Dep, l2Arr, gap, slack, polls, alertAt, alertMins, tier,
+    windows, win, nextWin, tta, phase, checkpoints, severeAps, boosts, every, nextIn };
+}
+
+const ackOf = c => state.ack[c.id] || (c.ack ? { by: c.ack.by, at: T0 - c.ack.ago * 60000 } : null);
+const msgKind = d => d.tier === 'cancel' ? 'cancel' : d.tier === 'back' ? 'back' : 'heads';
+const msgOf = (c, kind) => state.msg[c.id + ':' + kind]
+  || (c.sent && c.sent[kind] ? { v: 'sent', by: c.sent[kind].by, at: T0 - c.sent[kind].ago * 60000 } : { v: 'drafted' });
+const slackKey = x => x.d.slack ?? -1e6;
+const byFeed = (a, b) => ((a.d.tier === 'back') - (b.d.tier === 'back')) || (a.d.tta ?? 1e6) - (b.d.tta ?? 1e6) || slackKey(a) - slackKey(b);
+const byRisk = (a, b) => slackKey(a) - slackKey(b) || (a.d.tta ?? 1e6) - (b.d.tta ?? 1e6);
+const clockCls = d => d.tier === 'cancel' || d.tier === 'risk' ? (d.tta < 30 ? 'u-red' : d.tta < 120 ? 'u-amber' : '') : '';
+
+// Search: passenger, company, booking ref, flight number, airport code or city. Words combine.
+const HAY = new Map();
+function hay(c) {
+  if (!HAY.has(c.id)) {
+    const aps = [c.leg1.from, c.leg1.to, c.leg2.to];
+    HAY.set(c.id, fold([c.ref, c.company, ...c.travellers, c.leg1.flight, c.leg2.flight, ...aps,
+      ...aps.flatMap(a => [AIRPORTS[a].name, AIRPORTS[a].city])].join(' ')));
+  }
+  return HAY.get(c.id);
+}
+const terms = () => fold(state.q).split(/\s+/).filter(Boolean);
+const matches = c => terms().every(t => hay(c).includes(t));
+function airportsFor(hits) {
+  const ts = terms(), codes = Object.keys(AIRPORTS);
+  if (!ts.length) return codes;
+  const direct = codes.filter(code => ts.every(t => fold(`${code} ${AIRPORTS[code].name} ${AIRPORTS[code].city}`).includes(t)));
+  if (direct.length) return direct;
+  const used = new Set(hits.flatMap(x => [x.c.leg1.from, x.c.leg1.to, x.c.leg2.to]));
+  return codes.filter(code => used.has(code));
+}
+
+// Pieces shared by the card and the drawer
+function tierPill(d) {
+  const [label, cls] = TIERS[d.tier];
+  return `<span class="tier ${cls}">${label}${d.slack != null ? ` <span class="n">${signed(d.slack)}</span>` : ''}</span>`;
+}
+function whyText(c, d) {
+  const l1 = c.leg1, l2 = c.leg2;
+  if (d.tier === 'cancel') return `<b>${l1.flight} is cancelled</b>, confirmed on re-check at ${fmtDesk(T0 - c.cancelled.checkedAgo * 60000)}. The ${l2.flight} connection at ${d.hub} can't be made as booked.`;
+  const late = l1.delay ? `${l1.flight} is ${l1.delay} min late` : `${l1.flight} is on time`;
+  if (d.tier === 'back') return `Back on track: ${late}, leaving ${d.gap} min to connect at ${d.hub}, needs ${d.mct}.`;
+  const conn = d.gap > 0 ? `${d.gap} min to connect at ${d.hub}, needs ${d.mct}` : `lands ${-d.gap} min after ${l2.flight} leaves`;
+  return `${late}: <b>${conn}.</b>${l2.delay ? ` ${l2.flight} is also ${l2.delay} min late.` : ''}`;
+}
+function ackBlock(c, d, pre) {
+  const ack = ackOf(c);
+  if (ack) return `<p class="st good">✓ Picked up by ${esc(ack.by)} · ${fmtDesk(ack.at)}</p>`;
+  const left = ESCALATE_MIN - d.alertMins;
+  return `<button class="btn primary" type="button" data-act="ack" data-id="${c.id}" data-fkey="${pre}ack-${c.id}">I'm on it</button>`
+    + (left > 0 ? `<p class="st warn">Escalates to the care team in ${left} min</p>` : '<p class="st bad">Escalated to the care team</p>');
+}
+// The card only shows where the message stands; sending or holding happens in the itinerary, next to the draft.
+function msgStatus(c, d) {
+  const kind = msgKind(d), m = msgOf(c, kind), label = MSG_LABEL[kind];
+  if (m.v === 'sent') return `<p class="st good">${label} sent · ${fmtDesk(m.at)}${m.by !== 'You' ? ' by ' + esc(m.by) : ''}</p>`;
+  return `<p class="st">${label} ${m.v === 'held' ? 'held · ' + fmtDesk(m.at) : 'drafted, not sent'}</p>`;
+}
+function msgBlock(c, d, pre) {
+  const kind = msgKind(d), m = msgOf(c, kind);
+  if (m.v === 'sent') return msgStatus(c, d);
+  return msgStatus(c, d) + `
+    <div class="btn-row"><button class="btn" type="button" data-act="send" data-kind="${kind}" data-id="${c.id}" data-fkey="${pre}send-${c.id}">Send</button>${m.v === 'held' ? ''
+      : `<button class="btn" type="button" data-act="hold" data-kind="${kind}" data-id="${c.id}" data-fkey="${pre}hold-${c.id}">Hold</button>`}</div>`;
+}
+function messageText(c, kind) {
+  const route = `${c.leg1.from}→${c.leg1.to}`, city = AIRPORTS[c.leg1.to].city;
+  if (kind === 'cancel') return `Heads up: the airline has cancelled your ${route} flight (${c.leg1.flight}), so your connection in ${city} won't work as booked. Our customer care team has been alerted. You don't need to do anything yet. We'll message you as soon as we know more.`;
+  if (kind === 'back') return `Good news: your ${route} flight has made up time, and your connection in ${city} is back on track. You don't need to do anything.`;
+  return `Heads up: your ${route} flight is running about ${c.leg1.delay} min late, which puts your connection in ${city} at risk. Our customer care team has been alerted to the situation. You don't need to do anything yet. We'll message you if your plans need to change.`;
+}
+function nextText(d, now) {
+  if (!d.nextWin) return '';
+  const m = dur(minsUntil(d.nextWin.t, now));
+  return d.nextWin.name === 'Landing' ? `Lands in ${m}` : `${d.nextWin.name} in ${m}`;
+}
+
+// At risk
+function card(x, now) {
+  const { c, d } = x;
+  const isNew = d.alertMins != null && d.alertMins < NEW_MIN && !ackOf(c);
+  return `<article class="card${state.open === c.id ? ' is-open' : ''}" data-row data-id="${c.id}" data-fkey="row-${c.id}" tabindex="0">
+    <div class="clock">
+      <div class="big ${clockCls(d)}">${d.tta != null ? dur(d.tta) : '–'}</div>
+      <div class="lbl">${d.win ? d.win.label : 'closed'}</div>
+      ${d.nextWin ? `<div class="then">${nextText(d, now)}</div>` : ''}
+    </div>
+    <div>
+      <div class="who"><span class="names">${c.travellers.join(', ')}</span><span class="meta">${c.company} · ${c.ref}</span>${isNew ? '<span class="new">New</span>' : ''}${tierPill(d)}</div>
+      <div class="route mono">${c.leg1.from} → ${c.leg1.to} → ${c.leg2.to} · ${c.leg1.flight} + ${c.leg2.flight}</div>
+      <p class="why">${whyText(c, d)}</p>
+    </div>
+    <div class="actions">${ackBlock(c, d, '')}${msgStatus(c, d)}</div>
+  </article>`;
+}
+function overview(feed, all) {
+  const risky = feed.filter(x => x.d.tier !== 'back');
+  const need = feed.filter(x => !ackOf(x.c)).length;
+  const people = risky.reduce((s, x) => s + x.c.travellers.length, 0);
+  const next = Math.min(...risky.map(x => x.d.tta ?? Infinity));
+  const watching = `watching ${all.length} connections through AMS`;
+  if (!risky.length) return `Nothing at risk right now · ${watching}`;
+  return `<b>${risky.length} at risk</b> (${plural(people, 'traveller')}) · <b>${need} need${need === 1 ? 's' : ''} action</b>`
+    + (isFinite(next) ? ` · next window closes in <b>${dur(next)}</b>` : '') + ` · ${watching}`;
+}
+function emptyState(tab, counts) {
+  const what = { risk: 'at-risk bookings', watch: 'watched connections', wx: 'airports' }[tab];
+  if (!state.q.trim()) return `<div class="empty"><p>No ${what} right now.</p></div>`;
+  const others = ['risk', 'watch', 'wx'].filter(t => t !== tab && counts[t] > 0)
+    .map(t => `<button class="btn" type="button" data-act="goto" data-target="${t}">${TAB_NAME[t]} has ${counts[t]}</button>`).join('');
+  return `<div class="empty"><p>No ${what} match “${esc(state.q.trim())}”.</p>${others ? `<div class="btn-row">${others}</div>` : ''}<button class="link" type="button" data-act="clear">Clear search</button></div>`;
+}
+function feedHTML(list, counts, now) {
+  if (!list.length) return emptyState('risk', counts);
+  const need = list.filter(x => !ackOf(x.c)), hand = list.filter(x => ackOf(x.c));
+  return `<h2 class="label">Needs action <span class="count">${need.length}</span></h2>
+    <div class="feed">${need.length ? need.map(x => card(x, now)).join('') : '<p class="none">Nothing waiting for an agent.</p>'}</div>
+    <h2 class="label">In hand <span class="count">${hand.length}</span></h2>
+    <div class="feed">${hand.length ? hand.map(x => card(x, now)).join('') : '<p class="none">Nobody has picked anything up yet.</p>'}</div>`;
+}
+
+// Watching
+function watchRow(x) {
+  const { c, d } = x;
+  const readings = d.polls.slice(-3).map(p => `<span class="${p < 0 ? 'neg' : ''}">${num(p)}</span>`).join(' → ');
+  return `<tr data-row data-id="${c.id}" data-fkey="row-${c.id}" tabindex="0" class="${state.open === c.id ? 'is-open' : ''}">
+    <td>${tierPill(d)}</td>
+    <td><b>${c.travellers.join(', ')}</b><div class="muted small">${c.company} · ${c.ref}</div></td>
+    <td><span class="mono">${c.leg1.from} → ${c.leg1.to} → ${c.leg2.to}</span><div class="muted small mono">${c.leg1.flight} + ${c.leg2.flight}</div></td>
+    <td class="mono">${d.gap} / ${d.mct} min</td>
+    <td class="mono">${readings}</td>
+    <td>Every ${d.every} min<div class="muted small">${d.boosts.length ? 'Boosted: ' + d.boosts.join('; ') : 'Normal rate'} · next in ${d.nextIn} min</div></td>
+    <td><span class="mono">${d.tta != null ? dur(d.tta) : '–'}</span><div class="muted small">${d.win ? d.win.label : ''}</div></td>
+  </tr>`;
+}
+function watchHTML(list, all, counts) {
+  if (!list.length) return emptyState('watch', counts);
+  const perHour = x => 60 / x.d.every;
+  const total = Math.round(all.reduce((s, x) => s + perHour(x), 0));
+  const boosted = Math.round(all.filter(x => x.d.boosts.length).reduce((s, x) => s + perHour(x), 0));
+  return `<div class="tablewrap"><table class="watch"><thead><tr><th>Risk</th><th>Travellers</th><th>Route</th><th>Has / needs</th><th>Readings</th><th>Checks</th><th>Time to act</th></tr></thead>
+    <tbody>${list.map(watchRow).join('')}</tbody></table></div>
+    <p class="foot">About ${total} flight-status checks in the next hour across all ${all.length} connections. ${boosted} of them are on connections with a reading below 0 or severe weather on the route.</p>`;
+}
+
+// Weather
+function hourStrip(code, now) {
+  const d = WX[code], tz = AIRPORTS[code].tz, h = d.hourly, s = Math.floor(now / 1000);
+  const i = h.time.findIndex(x => s >= x && s < x + 3600);
+  if (i < 0) return '';
+  const cells = [];
+  for (let k = i; k < Math.min(i + 12, h.time.length); k++) {
+    const w = { code: h.weather_code[k], gust: h.wind_gusts_10m[k], wind: h.wind_speed_10m[k], precip: h.precipitation[k], vis: h.visibility ? h.visibility[k] : null };
+    const sev = severeReasons(w), hh = fmt(h.time[k] * 1000, tz);
+    const title = `${hh} · ${cond(w.code)} · gusts ${Math.round(w.gust)} km/h · ${w.precip.toFixed(1)} mm · visibility ${visTxt(w.vis)}${sev.length ? ' · severe: ' + sev.join(', ') : ''}`;
+    cells.push(`<li class="hr${sev.length ? ' sev' : ''}" title="${esc(title)}"><span class="h">${hh}</span><span class="g">${Math.round(w.gust)}${sev.length ? ' ' + WARN : ''}</span><span class="p">${w.precip.toFixed(1)}</span></li>`);
+  }
+  return `<p class="strip-key">Next 12 hours, local time · gusts in km/h, precipitation in mm</p><ol class="strip">${cells.join('')}</ol>`;
+}
+function airportCard(code, hits, now) {
+  const a = AIRPORTS[code], tz = a.tz, d = WX && WX[code];
+  let current = `<p class="now muted">${wxNA()}</p>`, strip = '';
+  if (d) {
+    const cur = d.current;
+    const w = { code: cur.weather_code, gust: cur.wind_gusts_10m, wind: cur.wind_speed_10m, precip: cur.precipitation, vis: cur.visibility };
+    const sev = severeReasons(w);
+    current = `<p class="now${sev.length ? ' sev' : ''}"><span class="k">Now</span>${sev.length ? WARN + ' ' + sev.join(', ') : cond(w.code)} · wind ${Math.round(w.wind)} km/h · gusts ${Math.round(w.gust)} km/h · ${w.precip.toFixed(1)} mm · visibility ${visTxt(w.vis)}</p>`;
+    strip = hourStrip(code, now);
+  }
+  const groups = new Map();
+  for (const x of hits) for (const p of x.d.checkpoints) {
+    if (p.ap !== code || p.t < now - 3600000) continue;
+    const key = p.w ? p.w.start : Math.floor(p.t / 3600000) * 3600000;
+    if (!groups.has(key)) groups.set(key, { start: key, w: p.w, severe: p.severe, items: [] });
+    groups.get(key).items.push({ x, p });
+  }
+  const rows = [...groups.values()].sort((g1, g2) => g1.start - g2.start).map(g => {
+    const nums = g.w ? wxParts(g.w, g.severe, true) : wxNA();
+    const chips = g.items.sort((e1, e2) => e1.p.t - e2.p.t).map(({ x, p }) => {
+      const cancelled = x.d.tier === 'cancel' && p.flight === x.c.leg1.flight ? ' · cancelled' : '';
+      return `<button class="fchip" type="button" data-open="${x.c.id}">${p.flight} ${p.ev} ${fmt(p.t, tz)} · ${esc(surname(x.c))}${cancelled}</button>`;
+    }).join('');
+    return `<li class="hrow${g.severe.length ? ' sev' : ''}"><div class="when"><b class="mono">${fmt(g.start, tz)}–${fmt(g.start + 3600000, tz)}</b><span>${nums}</span>${g.severe.length ? '<span class="boosted">These flights are checked more often</span>' : ''}</div><div class="chips">${chips}</div></li>`;
+  }).join('');
+  return `<article class="ap">
+    <div class="ap-head"><span class="ap-code">${code}</span><span class="ap-name">${a.name}</span><span class="muted small">${fmt(now, tz)} local</span></div>
+    ${current}${strip}
+    ${rows ? `<p class="strip-key">Watched flights here, by forecast hour</p><ol class="hours">${rows}</ol>` : '<p class="strip-key">No watched flights here in the next day.</p>'}
+  </article>`;
+}
+
+// Itinerary drawer
+const carrier = flight => CARRIERS[flight.slice(0, 2)] || flight.slice(0, 2);
+function ticketLine(c) {
+  const a = carrier(c.leg1.flight), b = carrier(c.leg2.flight);
+  return c.ticket === 'separate'
+    ? `<p class="ticket exposed"><b>Separate tickets</b> (${a}, then ${b}): no airline protection on this connection.</p>`
+    : `<p class="ticket"><b>One ticket</b> for both flights (${a === b ? a : a + ' and ' + b}): the airline protects this connection.</p>`;
+}
+function activity(c, d, now) {
+  const ev = [], T = ago => T0 - ago * 60000;
+  if (c.cancelled) {
+    ev.push([T(c.cancelled.reportedAgo), `Feed reported ${c.leg1.flight} cancelled. Re-checking before alerting.`]);
+    ev.push([T(c.cancelled.checkedAgo), 'Re-check confirmed the cancellation. Alert raised.']);
+  } else if (d.alertAt != null) ev.push([d.alertAt, 'Alert raised: 2 checks in a row below 0.']);
+  const ack = ackOf(c), escAt = d.alertAt != null ? d.alertAt + ESCALATE_MIN * 60000 : null;
+  if (escAt && escAt <= now && (!ack || ack.at > escAt)) ev.push([escAt, `Nobody picked it up within ${ESCALATE_MIN} min. Re-sent to the care team.`]);
+  if (ack) ev.push([ack.at, `Picked up by ${esc(ack.by)}.`]);
+  if (c.sent) for (const [k, s] of Object.entries(c.sent)) ev.push([T(s.ago), `${MSG_LABEL[k]} sent by ${esc(s.by)}.`]);
+  for (const k of Object.keys(MSG_LABEL)) { const s = state.msg[c.id + ':' + k]; if (s) ev.push([s.at, `${MSG_LABEL[k]} ${s.v} by You.`]); }
+  if (c.recoveredAgo != null) ev.push([T(c.recoveredAgo), 'Back on track: the last 2 checks are above 0.']);
+  return ev.sort((e1, e2) => e1[0] - e2[0]);
+}
+function drawerHTML(c, d, now) {
+  const l1 = c.leg1, l2 = c.leg2, tz = ap => AIRPORTS[ap].tz, onFeed = ON_FEED.has(d.tier);
+  const tm = (sched, est, ap) => est !== sched ? `<s>${fmt(sched, tz(ap))}</s> ${fmt(est, tz(ap))}` : fmt(est, tz(ap));
+  const late = m => m ? ` <span class="late">+${m} min</span>` : '';
+  const lateBy = l1.delay ? `, ${l1.delay} min late` : '';
+  const l1Status = c.cancelled ? '<b class="u-red">Cancelled</b>'
+    : d.phase === 'origin' ? `${l1.delay ? `Delayed ${l1.delay} min` : 'On time'} · boarding from about ${fmt(d.boardAt, tz(l1.from))}`
+    : d.phase === 'boarding' ? `Boarding (estimated)${lateBy}`
+    : d.phase === 'air' ? `In the air${lateBy}` : 'Landed';
+  const connCls = d.tier === 'cancel' || d.slack < 0 ? 'bad' : d.slack < TIGHT_MIN ? 'warn' : 'good';
+  const connTxt = c.cancelled ? `${l1.flight} is cancelled, so this connection can't be made as booked.`
+    : d.gap <= 0 ? `${l1.flight} lands ${-d.gap} min after ${l2.flight} leaves.`
+    : `Has ${d.gap} min to connect, needs ${d.mct} (${d.hub} minimum): ${d.slack < 0 ? `<b>${-d.slack} min short</b>` : `${d.slack} min spare`}.`;
+  const l1Late = c.cancelled ? 0 : l1.delay;
+
+  const journey = `<ol class="journey">
+    <li class="stop"><span class="code">${l1.from}</span><div><p><b>${l1.flight} departs</b> <span class="mono">${tm(l1.schedDep, d.l1Dep, l1.from)}</span>${late(l1Late)}</p><p class="muted small">${AIRPORTS[l1.from].name} · ${l1Status}</p></div></li>
+    <li class="stop"><span class="code">${d.hub}</span><div><p><b>${l1.flight} lands</b> <span class="mono">${tm(l1.schedArr, d.l1Arr, d.hub)}</span>${late(l1Late)}</p><p class="muted small">${AIRPORTS[d.hub].name}${c.cancelled ? ' · <b class="u-red">Cancelled</b>' : ''}</p></div></li>
+    <li class="conn ${connCls}">${connTxt}</li>
+    <li class="stop"><span class="code">${l2.from}</span><div><p><b>${l2.flight} departs</b> <span class="mono">${tm(l2.schedDep, d.l2Dep, l2.from)}</span>${late(l2.delay)}</p><p class="muted small">${l2.delay ? `Delayed ${l2.delay} min` : 'On time'}</p></div></li>
+    <li class="stop"><span class="code">${l2.to}</span><div><p><b>${l2.flight} lands</b> <span class="mono">${tm(l2.schedArr, d.l2Arr, l2.to)}</span></p><p class="muted small">${AIRPORTS[l2.to].name}</p></div></li>
+  </ol>`;
+
+  const windows = `<ol class="windows">${d.windows.map(w => {
+    const passed = w.t <= now;
+    return `<li class="win${w === d.win ? ' now' : ''}${passed ? ' passed' : ''}"><span class="mono">${fmt(w.t, tz(w.ap))} ${w.ap}</span><span><b>${w.name}</b> · ${passed ? 'passed' : 'in ' + dur(minsUntil(w.t, now))}</span><span class="muted">${w.what}</span></li>`;
+  }).join('')}</ol>`;
+
+  const rule = {
+    risk: `Alert rule: 2 checks in a row below 0. Met ${d.alertMins} min ago.`,
+    back: `It alerted ${d.alertMins} min ago. The last 2 checks are back above 0.`,
+    unconf: 'Alert rule: 2 checks in a row below 0. Only the latest one is, so no alert yet.',
+    tight: 'Alert rule: 2 checks in a row below 0. Not met.',
+    ok: 'Alert rule: 2 checks in a row below 0. Not met.',
+  }[d.tier];
+  const readings = d.polls.map((p, i) => {
+    const ago = (d.polls.length - 1 - i) * d.every;
+    return `<li class="${p < 0 ? 'neg' : ''}"><span class="mono">${num(p)}</span><span>${ago ? ago + ' min ago' : 'latest'}</span></li>`;
+  }).join('');
+  const why = c.cancelled
+    ? `<p>The feed reported <b>${l1.flight} cancelled</b> at ${fmtDesk(T0 - c.cancelled.reportedAgo * 60000)}. A cancelled flight is sometimes consolidated onto another one, so the watcher re-checked at ${fmtDesk(T0 - c.cancelled.checkedAgo * 60000)} before alerting. It was still cancelled.</p>`
+    : `<p class="mono small">${l2.flight} departs ${fmt(d.l2Dep, tz(l2.from))} − ${l1.flight} lands ${fmt(d.l1Arr, tz(d.hub))} = ${d.gap} min, − ${d.mct} min ${d.hub} minimum = <b class="${d.slack < 0 ? 'u-red' : ''}">${signed(d.slack)}</b></p>
+       <p class="k">Feed readings of projected slack</p><ol class="readings">${readings}</ol><p>${rule}</p>`;
+  const checks = `<p>Checking every ${d.every} min${d.boosts.length ? ` (boosted: ${d.boosts.join('; ')})` : ''}. Next check in ${d.nextIn} min.</p>`;
+
+  const wxRows = d.checkpoints.map(p => {
+    const z = tz(p.ap);
+    if (!p.w) return `<tr><td><b>${p.ap}</b></td><td>${p.flight} ${p.ev}</td><td class="mono">${fmt(p.t, z)}</td><td colspan="7" class="muted">${wxNA()}</td></tr>`;
+    return `<tr class="${p.severe.length ? 'sev' : ''}"><td><b>${p.ap}</b></td><td>${p.flight} ${p.ev}</td><td class="mono">${fmt(p.t, z)}</td>`
+      + `<td class="mono">${fmt(p.w.start, z)}–${fmt(p.w.start + 3600000, z)}</td><td>${cond(p.w.code)} (${p.w.code})</td>`
+      + `<td class="mono">${Math.round(p.w.wind)}</td><td class="mono">${Math.round(p.w.gust)}</td><td class="mono">${p.w.precip.toFixed(1)}</td>`
+      + `<td class="mono">${visTxt(p.w.vis)}</td><td>${p.severe.length ? WARN + ' ' + p.severe.join(', ') : 'No'}</td></tr>`;
+  }).join('');
+  const wxTable = `<div class="tablewrap"><table><thead><tr><th>Airport</th><th>Flight</th><th>Est. local</th><th>Forecast hour</th><th>Condition</th><th>Wind km/h</th><th>Gusts km/h</th><th>Precip mm</th><th>Visibility</th><th>Severe</th></tr></thead><tbody>${wxRows}</tbody></table></div>
+    <p class="muted small">Live from Open-Meteo, matched by airport and by the hour each flight uses it. Weather changes how often we check, not whether we alert.</p>`;
+
+  const log = activity(c, d, now);
+  return `<div class="d-head">
+      <div><p class="eyebrow">Itinerary · <span class="tag">Sample</span></p><h2>${c.travellers.join(', ')}</h2><p class="muted small">${c.company} · ${c.ref} · ${c.contact}</p></div>
+      <button class="icon-btn" type="button" data-act="close" data-fkey="close" aria-label="Close itinerary">✕</button>
+    </div>
+    <div class="d-status">${d.win ? `<span class="big ${clockCls(d)}">${dur(d.tta)}</span><span>${d.win.label}</span>` : ''}${tierPill(d)}</div>
+    ${onFeed ? `<div class="d-actions actions">${ackBlock(c, d, 'd-')}</div>` : ''}
+    <section class="d-sec"><h3>Journey</h3>${journey}${ticketLine(c)}</section>
+    <section class="d-sec"><h3>Windows to act</h3>${windows}</section>
+    <section class="d-sec"><h3>${onFeed ? 'Why we alerted' : 'Feed readings'}</h3>${why}${checks}</section>
+    <section class="d-sec"><h3>Weather at each checkpoint</h3>${wxTable}</section>
+    ${onFeed ? `<section class="d-sec"><h3>Message to traveller</h3><p class="draft">${messageText(c, msgKind(d))}</p><div class="actions">${msgBlock(c, d, 'd-')}</div></section>` : ''}
+    ${log.length ? `<section class="d-sec"><h3>Activity</h3><ol class="log">${log.map(([t, txt]) => `<li><span class="mono muted">${fmtDesk(t)}</span><span>${txt}</span></li>`).join('')}</ol></section>` : ''}`;
+}
+function renderDrawer(all, now) {
+  const x = state.open && all.find(x => x.c.id === state.open);
+  if (!x) state.open = null;
+  $('drawer').hidden = !x;
+  $('scrim').hidden = !x;
+  document.body.classList.toggle('drawer-open', !!x);
+  if (x) $('drawerBody').innerHTML = drawerHTML(x.c, x.d, now);
+}
+
+// Render
+function render() {
+  const now = Date.now();
+  const fkey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.fkey : null;
+  const body = $('drawerBody'), scroll = state.open === lastOpen ? body.scrollTop : 0;
+
+  const all = CONNECTIONS.map(c => ({ c, d: derive(c, now) })).filter(x => x.d.phase !== 'done');
+  const feed = all.filter(x => ON_FEED.has(x.d.tier));
+  const hits = all.filter(x => matches(x.c));
+  const feedM = hits.filter(x => ON_FEED.has(x.d.tier)).sort(byFeed);
+  const watchM = hits.filter(x => !ON_FEED.has(x.d.tier)).sort(byRisk);
+  const apsM = airportsFor(hits);
+  const counts = { risk: feedM.length, watch: watchM.length, wx: apsM.length };
+
+  $('clock').textContent = fmtDesk(now);
+  $('wxStatus').innerHTML = WX
+    ? (wxError ? `<span class="u-red">Weather refresh failed</span>, showing data from ${stamp(wxFetchedAt)}` : `Weather live from Open-Meteo, fetched ${stamp(wxFetchedAt)}`)
+    : wxError ? `<span class="u-red">Weather unavailable (${esc(wxError)})</span>, retrying` : 'Loading live weather…';
+  for (const k of Object.keys(counts)) $('n-' + k).textContent = counts[k];
+  const q = state.q.trim(), s = $('searching');
+  s.hidden = !q;
+  if (q) s.innerHTML = `<span>Matching “${esc(q)}”: ${plural(counts.risk, 'at-risk booking')}, ${plural(counts.watch, 'watched connection')}, ${plural(counts.wx, 'airport')}</span><button class="link" type="button" data-act="clear">Clear search</button>`;
+
+  $('overview').innerHTML = overview(feed, all);
+  $('feed').innerHTML = feedHTML(feedM, counts, now);
+  $('watch').innerHTML = watchHTML(watchM, all, counts);
+  $('wx').innerHTML = apsM.length ? apsM.map(code => airportCard(code, hits, now)).join('') : emptyState('wx', counts);
+  renderDrawer(all, now);
+  body.scrollTop = scroll;
+  lastOpen = state.open;
+  refocus(fkey);
+}
+function refocus(key) {
+  if (!key) return;
+  let el = document.querySelector(`[data-fkey="${key}"]`);
+  if (!el) {  // the button that had focus went away (e.g. after "I'm on it")
+    const m = key.match(/^(d-)?(?:ack|send|hold)-(.+)$/);
+    if (m) el = document.querySelector(m[1] ? '[data-fkey="close"]' : `[data-fkey="row-${m[2]}"]`);
+  }
+  if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+}
+
+// Interaction
+const wide = () => window.matchMedia('(min-width: 1200px)').matches;
+const rowsInTab = () => [...document.querySelectorAll(`#panel-${state.tab} [data-row]`)];
+function openDrawer(id) {
+  state.open = id;
+  render();
+  if (!wide()) { const b = document.querySelector('[data-fkey="close"]'); if (b) b.focus({ preventScroll: true }); }
+}
+function closeDrawer() {
+  const id = state.open;
+  state.open = null;
+  render();
+  const row = document.querySelector(`#panel-${state.tab} [data-fkey="row-${id}"]`);
+  if (row) row.focus({ preventScroll: true });
+}
+function setTab(tab) {
+  state.tab = tab;
+  for (const t of ['risk', 'watch', 'wx']) {
+    $('tab-' + t).setAttribute('aria-selected', String(t === tab));
+    $('panel-' + t).hidden = t !== tab;
+  }
+  try { history.replaceState(null, '', { risk: '#at-risk', watch: '#watching', wx: '#weather' }[tab]); } catch (e) { /* not allowed here */ }
+  render();
+}
+function ack(id) {
+  const c = CONNECTIONS.find(c => c.id === id);
+  if (!c || ackOf(c) || !ON_FEED.has(derive(c, Date.now()).tier)) return;
+  state.ack[id] = { by: 'You', at: Date.now() };
+  render();
+}
+function act(btn) {
+  const a = btn.dataset.act, id = btn.dataset.id;
+  if (a === 'ack') return ack(id);
+  if (a === 'close') return closeDrawer();
+  if (a === 'goto') return setTab(btn.dataset.target);
+  if (a === 'clear') { qEl.value = ''; state.q = ''; }
+  if (a === 'send' || a === 'hold') state.msg[id + ':' + btn.dataset.kind] = { v: a === 'send' ? 'sent' : 'held', by: 'You', at: Date.now() };
+  render();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target;
+  const b = t.closest('[data-act]'); if (b) return act(b);
+  const tab = t.closest('[data-tab]'); if (tab) return setTab(tab.dataset.tab);
+  const chip = t.closest('[data-open]'); if (chip) return openDrawer(chip.dataset.open);
+  const row = t.closest('[data-row]');
+  if (row) { if (String(window.getSelection())) return; return openDrawer(row.dataset.id); }
+  if (t.closest('#scrim')) closeDrawer();
+});
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const inField = e.target.matches && e.target.matches('input, textarea, select');
+  if (e.key === 'Escape') {
+    if (state.open) { e.preventDefault(); closeDrawer(); }
+    else if (inField && qEl.value) { qEl.value = ''; state.q = ''; render(); }
+    else if (inField) qEl.blur();
+    return;
+  }
+  if (inField) {
+    if (e.target === qEl && (e.key === 'Enter' || e.key === 'ArrowDown')) {
+      const first = rowsInTab()[0];
+      if (!first) return;
+      e.preventDefault();
+      if (e.key === 'Enter') openDrawer(first.dataset.id); else first.focus();
+    }
+    return;
+  }
+  if (e.key === '/') { e.preventDefault(); qEl.focus(); qEl.select(); return; }
+  const inDrawer = e.target.closest && e.target.closest('#drawer');
+  const row = e.target.closest && e.target.closest('[data-row]');
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !inDrawer) {
+    const list = rowsInTab();
+    if (!list.length) return;
+    e.preventDefault();
+    let i = row ? list.indexOf(row) : -1;
+    i = e.key === 'ArrowDown' ? Math.min(list.length - 1, i + 1) : Math.max(0, i - 1);
+    list[i].focus();
+    list[i].scrollIntoView({ block: 'nearest' });
+    if (state.open && wide()) { state.open = list[i].dataset.id; render(); }
+    return;
+  }
+  if (e.key === 'Enter' && row && e.target === row) { e.preventDefault(); return openDrawer(row.dataset.id); }
+  if (e.key === 'a' || e.key === 'A') {
+    const id = row ? row.dataset.id : inDrawer ? state.open : null;
+    if (id) ack(id);
+  }
+});
+qEl.addEventListener('input', () => { state.q = qEl.value; render(); });
+
+async function loadWeather() {
+  const codes = Object.keys(AIRPORTS);
+  const vars = 'weather_code,precipitation,wind_speed_10m,wind_gusts_10m,visibility';
+  const url = 'https://api.open-meteo.com/v1/forecast'
+    + `?latitude=${codes.map(c => AIRPORTS[c].lat).join(',')}&longitude=${codes.map(c => AIRPORTS[c].lon).join(',')}`
+    + `&hourly=${vars}&current=${vars}&timezone=GMT&timeformat=unixtime&past_days=1&forecast_days=3`;
+  $('rawLink').href = url;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [data];
+    WX = Object.fromEntries(codes.map((c, i) => [c, list[i]]));
+    wxFetchedAt = Date.now();
+    wxError = null;
+  } catch (err) {
+    wxError = err.message || String(err);
+    setTimeout(loadWeather, 60000);
+  }
+  render();
+}
+
+const fromHash = { '#at-risk': 'risk', '#watching': 'watch', '#weather': 'wx' }[location.hash];
+setTab(fromHash || 'risk');
+loadWeather();
+setInterval(render, 15000);
+setInterval(loadWeather, 15 * 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+</script>
+</body>
+</html>
